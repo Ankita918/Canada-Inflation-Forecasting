@@ -3,6 +3,7 @@
 * Inflation Forecasting is important for economic analysis, policy-making, and decision support.
 * These insights hold particular significance for the Bank of Canada, as policymakers closely monitor inflation forecasts to guide decisions on interest rates.
 * The central goal of maintaining inflation at 2% underscores the relevance of accurate forecasts for effective monetary policy.
+* The following graph shows the Consumer Price Index of Canada from Jan 1972 till Aug 2023.
 
   ![CPI](https://github.com/Ankita918/Canada-Inflation-Forecasting/assets/105339262/047a8312-18be-4df0-9197-a3635a0c59c3)
 
