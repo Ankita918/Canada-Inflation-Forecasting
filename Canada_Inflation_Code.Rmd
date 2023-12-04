@@ -1,0 +1,402 @@
+---
+title: "Time Series Project"
+output: pdf_document
+---
+
+# Import libraries
+
+```{r }
+library(fpp3)
+library(fabletools)
+library(zoo)
+library(tseries)
+library(quantmod) # download data form Yahoo finance
+library(moments) # to know summary statistics of data
+library(tinytex)
+library(forecast)
+library(tsintermittent)
+library(expsmooth)
+library(readxl)
+library(dplyr)
+library(tsibble)
+library(ggplot2)
+library(fable.prophet) 
+library(prophet)
+library(fable.prophet) 
+#install.packages("fable.prophet")
+#install.packages("expsmooth")
+```
+
+# Read Data
+
+```{r }
+
+##*************************************************##
+fred_data <- read_excel("inflation_project.xls") 
+
+# Create date variable
+inflation <- zoo::fortify.zoo(fred_data)
+
+inflation <- as_tsibble(inflation, index = Index) # create tissble object
+
+inflation <- inflation |>
+mutate(month = row_number()) |>
+update_tsibble(index = month, regular = TRUE)
+head(inflation)
+tail(inflation)
+
+# Plot of CPI only
+inflation %>% autoplot(cpi,colour=("blue")) +
+labs(y="% Change From Year Ago",
+     x="Months after 1/1/1972",
+     title = "Consumer Price Index for Canada")
+  
+# All graphs together
+inflation %>% 
+  pivot_longer(c(cpi, exchange_rate, unemp_rate), names_to="Series") %>%
+autoplot(value) +
+labs(y="% Change From Year Ago",
+     x="Months after 1/1/1972",
+     title = "CPI, Exchange Rate and Unemployment Rate: Canada")
+
+# Summary of the data
+summary(inflation)
+
+#Missing data check
+tsoutliers(inflation$cpi)
+# No outliers
+
+tsoutliers(inflation$exchange_rate)
+# Replace exchange_rate outliers
+inflation$exchange_rate[442]<-round(3.922876)
+inflation$exchange_rate[443]<-round(4.781721)
+inflation$exchange_rate[444]<-round(5.640567)
+inflation$exchange_rate[445]<-round(6.499412)
+inflation$exchange_rate[446]<-round(7.358258)
+inflation$exchange_rate[447]<-round(8.217103)
+inflation$exchange_rate[448]<-round(9.075949)
+inflation$exchange_rate[449]<-round(9.934794)
+
+tsoutliers(inflation$unemp_rate)
+# Replace unemp_rate outliers
+inflation$unemp_rate[126]<-round(43.632917)
+inflation$unemp_rate[127]<-round(44.210275)
+inflation$unemp_rate[128]<-round(44.787633)
+inflation$unemp_rate[129]<-round(45.364990)
+inflation$unemp_rate[130]<-round(45.942347)
+inflation$unemp_rate[131]<-round(46.519705)
+inflation$unemp_rate[132]<-round(47.097062)
+inflation$unemp_rate[450]<-round(37.762417)
+inflation$unemp_rate[451]<-round(36.815155)
+inflation$unemp_rate[452]<-round(35.867893)
+inflation$unemp_rate[579]<-round(-2.324115)
+inflation$unemp_rate[580]<-round(-2.924089)
+inflation$unemp_rate[581]<-round(-3.524064)
+inflation$unemp_rate[582]<-round(-4.124038)
+inflation$unemp_rate[583]<-round(-4.724013)
+inflation$unemp_rate[584]<-round(-5.323988)
+inflation$unemp_rate[585]<-round(-5.923962)
+inflation$unemp_rate[586]<-round(-6.523937)
+inflation$unemp_rate[587]<-round(-7.123912)
+inflation$unemp_rate[588]<-round(-7.723886)
+inflation$unemp_rate[589]<-round(-8.323861)
+inflation$unemp_rate[590]<-round(-8.923835)
+inflation$unemp_rate[592]<-round(-15.097402)
+inflation$unemp_rate[593]<-round(-20.670995)
+inflation$unemp_rate[594]<-round(-26.244588)
+inflation$unemp_rate[133]<-round(44.84831)
+##*************************************************##
+# Train Dataset
+train_inflation <- inflation %>% filter(Date<='2022-08-31')
+head(train_inflation)
+tail(train_inflation)
+
+# Test Dataset
+test_inflation <- inflation %>% filter(Date>'2022-08-31' & Date<='2023-08-31')
+
+
+# Sign Correlation
+rho.cal<-function(X){
+  rho.hat<- cor(X-mean(X), sign(X-mean(X)))
+  return(as.numeric(rho.hat))
+}
+
+# Sign Correlation
+rho.cal(inflation$cpi)
+##*************************************************##
+
+```
+
+* The distribution is normal.
+
+
+# Benchmark methods
+
+```{r}
+# benchmark models (mean, naive, drift)
+inflation_ben_fit <- train_inflation |>
+  model(
+    Mean = MEAN(cpi),
+    Naïve = NAIVE(cpi),
+    Drift = RW(cpi ~ drift())
+  )
+
+# forecast
+inflation_ben_fc <- inflation_ben_fit |>
+  forecast(h=12)
+
+# Plot the forecasts with whole data
+inflation_ben_fc |>
+  autoplot(inflation)+ 
+  labs(y = "% Change From Year Ago",
+       x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Jan 1972 - Aug 2023)") 
+  #+guides(colour = guide_legend(title = "Forecast"))
+ 
+#Plot only forecast period        
+inflation_ben_fc |>
+  autoplot(test_inflation) + 
+  labs(y = "% Change From Year Ago",
+        x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Sept 2022 - Aug 2023)")
+
+#Accuracy()
+accuracy.ben <-  accuracy(inflation_ben_fc,inflation)
+
+#Residual check
+train_inflation |>model(NAIVE(cpi)) |>gg_tsresiduals()
+
+#Portmanteau tests for autocorrelation
+# Test for Naive method
+t<- train_inflation |>
+  model(NAIVE(cpi)) |>
+  augment()
+t |> features(.innov, box_pierce, lag = 25)
+
+# Test for drift Method
+fit <- train_inflation |> model(RW(cpi ~ drift()))
+tidy(fit)
+augment(fit) |> features(.innov, ljung_box, lag=25)
+
+```
+
+* Mean method gave very bad forecast.
+* Residuals for Naive method are not white noise . However, residuals for Drift method are white noise.
+
+# ARIMA Model
+
+```{r}
+fit__cpi_ar <- train_inflation |>
+  model(
+    arima = ARIMA(cpi)
+    #ets = ETS(CPI_Index)
+    #prophet = prophet(cpi)
+  )
+report(fit__cpi_ar) 
+
+#Residual check
+fit__cpi_ar |> gg_tsresiduals()
+#Portmanteau tests for autocorrelation
+augment(fit__cpi_ar) |> features(.innov, ljung_box, dof = 1, lag = 50)
+
+# Plot the forecasts with whole data
+fit__cpi_ar_fc <- fit__cpi_ar  %>% forecast(h = 12) 
+fit__cpi_ar_fc |>  autoplot(inflation)+ 
+  labs(y = "% Change From Year Ago",
+       x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Jan 1972 - Aug 2023)") 
+
+#Plot only forecast period        
+fit__cpi_ar_fc %>% autoplot(test_inflation)+ 
+  labs(y = "% Change From Year Ago",
+        x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Sept 2022 - Aug 2023)")
+
+#Accuracy
+accuracy.ar <- accuracy(fit__cpi_ar_fc,inflation)
+
+```
+
+* Residuals are not white noise..
+
+# Bootstrap
+
+```{r}
+fit <- train_inflation |>
+  model(ARIMA(cpi))
+sim <- fit |> generate(h = 12, times = 5, bootstrap = TRUE) # Each time 30 forecasts
+head(sim)
+
+
+train_inflation |>
+  ggplot(aes(x = month)) +
+  geom_line(aes(y = cpi)) +
+  geom_line(aes(y = .sim, colour = as.factor(.rep)),
+    data = sim) +
+  labs(title="Five simulated sample paths based on naive method with boostrapped residuls", y="$US" ) +
+  guides(colour = "none")
+
+
+fc <- fit |> forecast(h = 12, bootstrap = TRUE) 
+fc %>% 
+autoplot(test_inflation) +
+  labs(title="Forecasts of CIP")
+
+#accuracy(GOOG_fc, GOOG_stock) %>% select(.model, RMSE:MAPE)
+```
+
+
+# Neural Network model
+
+```{r }
+# NNAR Model
+fit_cpi_nn <- train_inflation %>% model(NNETAR(cpi))
+
+#Residual check
+fit_cpi_nn |> gg_tsresiduals()
+#Portmanteau tests for autocorrelation
+augment(fit_cpi_nn) |> features(.innov, ljung_box, lag = 50)
+
+# Plot the forecasts with whole data
+fit_cpi_fc <- fit_cpi_nn %>% forecast(h = 12) 
+fit_cpi_fc %>%  autoplot(inflation)+ 
+  labs(y = "% Change From Year Ago",
+       x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Jan 1972 - Aug 2023)") 
+
+#Plot only forecast period        
+fit_cpi_fc %>% autoplot(test_inflation)+ 
+  labs(y = "% Change From Year Ago",
+        x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Sept 2022 - Aug 2023)")
+
+# Accuracy
+accuracy.nn <- accuracy(fit_cpi_fc,inflation)
+```
+* * Residuals are white noise.
+
+# Timeseries Regression Model
+
+```{r}
+#Standard Time Series Regression Model
+fit_stand <- train_inflation %>%
+  model(lm = TSLM(cpi ~ exchange_rate+ unemp_rate))
+report(fit_stand)
+
+#***************** Scenario Based Forecasting**********************#
+# It is assumed that exchange rate and unemployment rate will remain constant 
+# for 12 months(testing period).
+cpi_future <- new_data( train_inflation, 12) |>
+  mutate(
+ exchange_rate = 2.8 ,
+    unemp_rate = -10
+  )
+#******************************************************************#
+
+# Plot the forecasts with whole data
+fit_stand_fc <-forecast(fit_stand, cpi_future) 
+fit_stand_fc |>
+  autoplot(inflation) + 
+  labs(y = "% Change From Year Ago",
+       x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Jan 1972 - Aug 2023)") 
+
+#Plot only forecast period  
+forecast(fit_stand, cpi_future) |>
+  autoplot(test_inflation) + 
+  labs(y = "% Change From Year Ago",
+        x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Sept 2022 - Aug 2023)")
+
+#Residual check
+fit_stand |> gg_tsresiduals()
+#Portmanteau tests for autocorrelation
+augment(fit_stand) |> features(.innov, ljung_box, lag = 50)
+
+# Accuracy
+accuracy.sr <- accuracy(fit_stand_fc ,inflation)
+```
+
+# Dynamic Regression Model
+
+```{r}
+#Dynamic Regression Model with ARIMA errors
+fit_dyn <- train_inflation |>
+  model(ARIMA(cpi ~ exchange_rate+ unemp_rate))
+report(fit_dyn )
+
+# Plot the forecasts with whole data
+fit_dyn_fc <- forecast(fit_dyn, cpi_future) 
+
+fit_dyn_fc |>
+  autoplot(inflation) + 
+  labs(y = "% Change From Year Ago",
+       x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Jan 1972 - Aug 2023)") 
+
+#Plot only forecast period  
+forecast(fit_dyn, cpi_future) |>
+  autoplot(test_inflation) + 
+  labs(y = "% Change From Year Ago",
+        x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Sept 2022 - Aug 2023)")
+
+#Residual check
+fit_dyn |> gg_tsresiduals()
+augment(fit_dyn) |> features(.innov, ljung_box, dof=1, lag = 50)
+
+# Accuracy
+accuracy.dr <- accuracy(fit_dyn_fc,inflation)
+```
+
+# Hybrid Model
+
+```{r}
+# Combine neural network model and dynamic regression model
+combine1 <- train_inflation %>% model(
+  Dynamic = ARIMA(cpi ~ exchange_rate+ unemp_rate),
+  Neural_Network =  NNETAR((cpi))
+) %>% 
+mutate( Combination=(Dynamic+ Neural_Network)/2 ) 
+
+
+fc_combine <- forecast(combine1, cpi_future) 
+
+# Plot the forecasts with whole data
+fc_combine %>%  autoplot(inflation)+ 
+  labs(y = "% Change From Year Ago",
+       x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Jan 1972 - Aug 2023)") 
+
+#Plot only forecast period  
+fc_combine %>%  autoplot(test_inflation)+ 
+  labs(y = "% Change From Year Ago",
+        x = "Months after 1/1/1972",
+       title = "CPI Index Forecast : Canada",
+       subtitle = "(Sept 2022 - Aug 2023)")
+
+
+#Accuracy
+accuracy.hm <- accuracy(fc_combine,inflation)
+```
+
+# Accuracy of all Models
+```{r}
+accuracy.table <- rbind(accuracy.ben, accuracy.ar,accuracy.nn,accuracy.sr,accuracy.dr,accuracy.hm)
+accuracy.table
+```
+
+
+**************************************************************************************************************************
+
